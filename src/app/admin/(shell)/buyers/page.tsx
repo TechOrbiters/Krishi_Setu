@@ -42,7 +42,8 @@ export default function AdminBuyersPage() {
         throw new Error(json.error || `HTTP ${res.status}`);
       }
 
-      setBuyers(json.buyers || []);
+      const rawBuyers = json.data?.buyers || json.buyers || (Array.isArray(json.data) ? json.data : []);
+      setBuyers(Array.isArray(rawBuyers) ? rawBuyers : []);
     } catch (err: any) {
       console.error('[AdminBuyers] Fetch error:', err);
       setError(err.message || 'Failed to fetch registered buyers.');

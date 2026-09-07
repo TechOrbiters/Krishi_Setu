@@ -42,7 +42,8 @@ export default function AdminDeliveryPage() {
         throw new Error(json.error || `HTTP ${res.status}`);
       }
 
-      setShipments(json.shipments || []);
+      const rawShipments = json.shipments || json.data?.shipments || (Array.isArray(json.data) ? json.data : []);
+      setShipments(Array.isArray(rawShipments) ? rawShipments : []);
     } catch (err: any) {
       console.error('[AdminDelivery] Fetch error:', err);
       setError(err.message || 'Failed to fetch active shipments.');

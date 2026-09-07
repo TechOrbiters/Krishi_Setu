@@ -17,9 +17,49 @@ import KpiCard from '@/components/admin/KpiCard';
 import DataTable, { Column } from '@/components/admin/DataTable';
 import { ErrorState } from '@/components/admin/EmptyState';
 import { getApiUrl } from '@/lib/api/client';
+import { MarketPriceRecord, MarketPriceApiResponse } from '@/lib/types/market';
+
+/**
+ * Normalizes any market price API response shape into a guaranteed MarketPriceRecord array.
+ * Handles canonical { success: true, data: { prices: [...] } }, { data: [...] },
+ * { prices: [...] }, raw arrays, and malformed/error payloads.
+ */
+function normalizePrices(response: unknown): MarketPriceRecord[] {
+  if (Array.isArray(response)) {
+    return response as MarketPriceRecord[];
+  }
+
+  if (response && typeof response === 'object') {
+    // Canonical format: { success: true, data: { prices: [...] } }
+    if ('data' in response) {
+      const dataObj = (response as { data?: unknown }).data;
+      if (Array.isArray(dataObj)) {
+        return dataObj as MarketPriceRecord[];
+      }
+      if (
+        dataObj &&
+        typeof dataObj === 'object' &&
+        'prices' in dataObj &&
+        Array.isArray((dataObj as { prices?: unknown }).prices)
+      ) {
+        return (dataObj as { prices: MarketPriceRecord[] }).prices;
+      }
+    }
+
+    // Direct property format: { prices: [...] }
+    if (
+      'prices' in response &&
+      Array.isArray((response as { prices?: unknown }).prices)
+    ) {
+      return (response as { prices: MarketPriceRecord[] }).prices;
+    }
+  }
+
+  return [];
+}
 
 export default function AdminPricesPage() {
-  const [prices, setPrices] = useState<any[]>([]);
+  const [prices, setPrices] = useState<MarketPriceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,16 +74,18 @@ export default function AdminPricesPage() {
       if (commodityFilter !== 'ALL') params.append('commodity', commodityFilter);
 
       const res = await fetch(getApiUrl(`/api/market-prices?${params.toString()}`));
-      const json = await res.json();
+      const json: MarketPriceApiResponse = await res.json();
 
       if (!res.ok || !json.success) {
         throw new Error(json.error?.message || `HTTP ${res.status}`);
       }
 
-      setPrices(json.data || []);
+      const normalized = normalizePrices(json);
+      setPrices(normalized);
     } catch (err: any) {
       console.error('[AdminPrices] Fetch error:', err);
       setError(err.message || 'Failed to fetch AGMARKNET market prices.');
+      setPrices([]);
     } finally {
       setLoading(false);
     }
@@ -71,19 +113,26 @@ export default function AdminPricesPage() {
   };
 
   const filteredPrices = prices.filter((p) => {
-    const crop = p.commodity || p.crop_name || '';
-    const market = p.market || p.market_name || '';
-    return !search || crop.toLowerCase().includes(search.toLowerCase()) || market.toLowerCase().includes(search.toLowerCase());
+    const crop = p.commodity || (p as any).crop_name || '';
+    const market = p.market || (p as any).market_name || '';
+    const variety = p.variety || '';
+    const searchLower = search.trim().toLowerCase();
+    return (
+      !searchLower ||
+      crop.toLowerCase().includes(searchLower) ||
+      market.toLowerCase().includes(searchLower) ||
+      variety.toLowerCase().includes(searchLower)
+    );
   });
 
-  const columns: Column<any>[] = [
+  const columns: Column<MarketPriceRecord>[] = [
     {
       key: 'commodity',
       header: 'Commodity',
       render: (row) => (
         <div>
           <div className="font-bold text-slate-900 dark:text-white">
-            {row.commodity || row.crop_name || 'Agri Commodity'}
+            {row.commodity || (row as any).crop_name || 'Agri Commodity'}
           </div>
           <div className="text-[11px] text-slate-400">
             {row.variety || 'Standard Grade'}
@@ -97,7 +146,7 @@ export default function AdminPricesPage() {
       render: (row) => (
         <div>
           <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-            {row.market || row.market_name || 'Barabanki Mandi'}
+            {row.market || (row as any).market_name || 'Barabanki Mandi'}
           </div>
           <div className="text-[11px] text-slate-400">
             {row.district || 'Uttar Pradesh'}
@@ -108,17 +157,25 @@ export default function AdminPricesPage() {
     {
       key: 'modal',
       header: 'Mandi Modal Price',
-      render: (row) => (
-        <span className="font-semibold text-slate-800 dark:text-slate-200">
-          ₹{row.modal_price || row.modal_price_per_kg || 22}/kg
-        </span>
-      ),
+      render: (row) => {
+        const perKg =
+          row.pricePerKg ??
+          (row.modalPrice ? Math.round(row.modalPrice / 100) : ((row as any).modal_price || (row as any).modal_price_per_kg || 22));
+        return (
+          <span className="font-semibold text-slate-800 dark:text-slate-200">
+            ₹{perKg}/kg
+          </span>
+        );
+      },
     },
     {
       key: 'direct',
       header: 'KrishiSetu Direct Price',
       render: (row) => {
-        const modal = Number(row.modal_price || row.modal_price_per_kg || 22);
+        const modal = Number(
+          row.pricePerKg ??
+          (row.modalPrice ? Math.round(row.modalPrice / 100) : ((row as any).modal_price || (row as any).modal_price_per_kg || 22))
+        );
         const directPrice = Math.round(modal * 1.18); // +18% direct farmgate realization
         return (
           <span className="font-bold text-emerald-600">
@@ -140,11 +197,15 @@ export default function AdminPricesPage() {
     {
       key: 'date',
       header: 'Agmarknet Timestamp',
-      render: (row) => (
-        <span className="text-[11px] text-slate-500">
-          {row.arrival_date || row.recorded_at ? new Date(row.arrival_date || row.recorded_at).toLocaleDateString('en-IN') : 'Live Daily Feed'}
-        </span>
-      ),
+      render: (row) => {
+        const rawDate = row.rawArrivalDate;
+        const isoDate = row.priceDate || (row as any).arrival_date || (row as any).recorded_at;
+        return (
+          <span className="text-[11px] text-slate-500">
+            {rawDate || (isoDate ? new Date(isoDate).toLocaleDateString('en-IN') : 'Live Daily Feed')}
+          </span>
+        );
+      },
     },
   ];
 
@@ -196,7 +257,11 @@ export default function AdminPricesPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <KpiCard
           title="Monitored Mandis"
-          value={prices.length > 0 ? `${new Set(prices.map(p => p.market)).size} Hubs` : '18 Hubs'}
+          value={
+            prices.length > 0
+              ? `${new Set(prices.map((p) => p.market).filter(Boolean)).size} Hubs`
+              : '18 Hubs'
+          }
           subtitle="Real-time AGMARKNET APMC feeds"
           icon={BarChart2}
           variant="blue"

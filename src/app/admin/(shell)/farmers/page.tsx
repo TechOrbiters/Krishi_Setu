@@ -46,7 +46,8 @@ export default function AdminFarmersPage() {
         throw new Error(json.error || `HTTP ${res.status}`);
       }
 
-      setFarmers(json.farmers || []);
+      const rawFarmers = json.data?.farmers || json.farmers || (Array.isArray(json.data) ? json.data : []);
+      setFarmers(Array.isArray(rawFarmers) ? rawFarmers : []);
     } catch (err: any) {
       console.error('[AdminFarmers] Fetch error:', err);
       setError(err.message || 'Failed to fetch registered farmers.');
