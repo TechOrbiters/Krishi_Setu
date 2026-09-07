@@ -471,7 +471,7 @@ export default function MasterLandingPage() {
               </div>
             </div>
             <button
-              onClick={() => { if (typeof window !== 'undefined') localStorage.setItem('krishi_active_role', 'ADMIN'); router.push('/admin'); }}
+              onClick={() => { router.push('/admin/login'); }}
               className="font-bold text-sm text-white flex-shrink-0 px-5 py-2.5 transition-all hover:opacity-95 hover:scale-[1.02] active:scale-[0.98]"
               style={{ background: '#7C3AED', borderRadius: '10px', boxShadow: '0 2px 8px rgba(124,58,237,0.32)', whiteSpace: 'nowrap' }}
             >
